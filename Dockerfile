@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+# Liga a imagem publicada no GHCR a este repositório (necessário para o
+# GITHUB_TOKEN do workflow ter permissão de escrita no pacote).
+LABEL org.opencontainers.image.source="https://github.com/rafaellimarc01/API-Pipeline"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
