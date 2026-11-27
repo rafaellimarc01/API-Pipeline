@@ -1,0 +1,73 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ---------- CI: lint + testes ----------
+  test:
+    name: Lint e testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Testes (pytest)
+        run: pytest -v
+
+  # ---------- CD: build, smoke test e publicação da imagem ----------
+  deliver:
+    name: Build e publicação da imagem
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build da imagem Docker
+        run: docker build -t api-pipeline:${{ github.sha }} .
+
+      - name: Smoke test do container
+        run: |
+          docker run -d --name api -p 8000:8000 api-pipeline:${{ github.sha }}
+          for i in $(seq 1 20); do
+            if curl -fs http://localhost:8000/health; then exit 0; fi
+            sleep 1
+          done
+          echo "A API não respondeu em /health"; docker logs api; exit 1
+
+      - name: Login no GitHub Container Registry
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar imagem (somente na main)
+        if: env.PUBLISH == 'true'
+        run: |
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}
+          for TAG in latest ${{ github.sha }}; do
+            docker tag api-pipeline:${{ github.sha }} "$IMAGE:$TAG"
+            docker push "$IMAGE:$TAG"
+          done
+          echo "Imagem publicada: $IMAGE:latest" >> "$GITHUB_STEP_SUMMARY"
